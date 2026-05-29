@@ -18,6 +18,7 @@ RUN apt-get update && apt-get install -y \
     x11-apps \
     ros-humble-rviz2 \
     ros-humble-demo-nodes-cpp \
+    ros-humble-turtlesim \
     && rm -rf /var/lib/apt/lists/*
 
 RUN rosdep init || true
