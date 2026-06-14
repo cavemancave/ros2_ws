@@ -1,29 +1,45 @@
-FROM ros:humble
+ARG ROS_DISTRO=humble
 
-ENV DEBIAN_FRONTEND=noninteractive
+########################################
+# Base Image for TurtleBot3 Simulation #
+########################################
+FROM ros:${ROS_DISTRO} as base
+ENV ROS_DISTRO=${ROS_DISTRO}
+SHELL ["/bin/bash", "-c"]
 
-RUN apt-get update && apt-get install -y \
-    python3-colcon-common-extensions \
-    python3-rosdep \
-    python3-vcstool \
-    git \
-    vim \
-    curl \
-    wget \
-    build-essential \
-    gdb \
-    net-tools \
-    iputils-ping \
-    mesa-utils \
-    x11-apps \
-    ros-humble-rviz2 \
-    ros-humble-demo-nodes-cpp \
-    ros-humble-turtlesim \
-    && rm -rf /var/lib/apt/lists/*
+# Create Colcon workspace with external dependencies
+RUN mkdir -p /turtlebot3_ws/src
+WORKDIR /turtlebot3_ws/src
+COPY dependencies.repos .
+RUN vcs import < dependencies.repos
 
-RUN rosdep init || true
-RUN rosdep update
+# Build the base Colcon workspace, installing dependencies first.
+WORKDIR /turtlebot3_ws
+RUN source /opt/ros/${ROS_DISTRO}/setup.bash \
+ && apt-get update -y \
+ && rosdep install --from-paths src --ignore-src --rosdistro ${ROS_DISTRO} -y \
+ && colcon build --symlink-install
+ENV TURTLEBOT3_MODEL=waffle_pi
 
-WORKDIR /workspace
+# Use Cyclone DDS as middleware
+RUN apt-get update && apt-get install -y --no-install-recommends \
+ ros-${ROS_DISTRO}-rmw-cyclonedds-cpp
+ENV RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
 
-RUN echo "source /opt/ros/humble/setup.bash" >> /root/.bashrc
+###########################################
+# Overlay Image for TurtleBot3 Simulation #
+###########################################
+FROM base AS overlay
+
+# Create an overlay Colcon workspace
+RUN mkdir -p /overlay_ws/src
+WORKDIR /overlay_ws
+COPY ./tb3_autonomy/ ./src/tb3_autonomy/
+COPY ./tb3_worlds/ ./src/tb3_worlds/
+RUN source /turtlebot3_ws/install/setup.bash \
+ && rosdep install --from-paths src --ignore-src --rosdistro ${ROS_DISTRO} -y \
+ && colcon build --symlink-install
+
+# Set up the entrypoint
+COPY ./docker/entrypoint.sh /
+ENTRYPOINT [ "/entrypoint.sh" ]
